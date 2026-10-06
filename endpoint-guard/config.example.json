@@ -1,0 +1,18 @@
+{
+  "dry_run": false,
+  "log_file": "C:\\ProgramData\\EndpointGuard\\events.jsonl",
+  "controls": {
+    "copy":       { "enabled": true },
+    "cut":        { "enabled": true },
+    "paste":      { "enabled": true },
+    "delete":     { "enabled": true, "exempt_processes": ["code.exe"] },
+    "drag_drop":  { "enabled": true },
+    "clipboard":  { "enabled": true },
+    "screenshot": { "enabled": false }
+  },
+  "exempt_processes": ["keepass.exe"],
+  "exempt_users": ["administrator"],
+  "drag_threshold": 4,
+  "protected_paths": ["C:\\Data\\Confidential"],
+  "policy_server": null
+}
