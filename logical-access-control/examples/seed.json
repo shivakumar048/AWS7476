@@ -1,0 +1,136 @@
+{
+  "policies": {
+    "AuditorReadOnly": {
+      "description": "Read-only visibility into identities, policies and the audit trail",
+      "document": {
+        "Statement": [
+          {
+            "Sid": "ReadOnly",
+            "Effect": "Allow",
+            "Action": ["lac:List*", "lac:Get*", "lac:ReviewAccess", "lac:ReadAuditLog", "lac:SimulatePrincipalPolicy"],
+            "Resource": "*"
+          }
+        ]
+      }
+    },
+    "HelpdeskUserAdmin": {
+      "description": "Unlock accounts and reset passwords, but never for administrators",
+      "document": {
+        "Statement": [
+          {
+            "Sid": "ManageUsers",
+            "Effect": "Allow",
+            "Action": ["lac:ListUsers", "lac:GetUser", "lac:UnlockUser", "lac:ChangePassword", "lac:EnableUser", "lac:DisableUser"],
+            "Resource": "lac:user/*"
+          },
+          {
+            "Sid": "ProtectAdmins",
+            "Effect": "Deny",
+            "Action": "lac:*",
+            "Resource": "lac:user/admin*"
+          }
+        ]
+      }
+    },
+    "EC2TeamOperator": {
+      "description": "Describe all EC2 instances; start/stop only instances tagged with your own team",
+      "document": {
+        "Statement": [
+          {
+            "Sid": "Describe",
+            "Effect": "Allow",
+            "Action": "ec2:Describe*",
+            "Resource": "*"
+          },
+          {
+            "Sid": "StartStopOwnTeam",
+            "Effect": "Allow",
+            "Action": ["ec2:StartInstances", "ec2:StopInstances", "ec2:RebootInstances"],
+            "Resource": "arn:aws:ec2:*:*:instance/*",
+            "Condition": {
+              "StringEquals": { "resource:tag/team": "${user:tag/team}" }
+            }
+          }
+        ]
+      }
+    },
+    "S3HomeFolder": {
+      "description": "Each user may read/write only their own home prefix",
+      "document": {
+        "Statement": [
+          {
+            "Sid": "OwnHome",
+            "Effect": "Allow",
+            "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+            "Resource": "arn:aws:s3:::company-data/home/${user:name}/*"
+          }
+        ]
+      }
+    },
+    "ProdDeployBusinessHours": {
+      "description": "Deploy to production only during the 08:00-18:00 UTC change window",
+      "document": {
+        "Statement": [
+          {
+            "Sid": "Deploy",
+            "Effect": "Allow",
+            "Action": "deploy:*",
+            "Resource": "app:prod/*",
+            "Condition": { "TimeOfDayBetween": { "request:timeofday": "08:00-18:00" } }
+          }
+        ]
+      }
+    },
+    "PaymentRequester": {
+      "description": "Create payment requests",
+      "document": {
+        "Statement": [
+          { "Effect": "Allow", "Action": ["payments:Create*", "payments:Get*"], "Resource": "payments:*" }
+        ]
+      }
+    },
+    "PaymentApprover": {
+      "description": "Approve payment requests",
+      "document": {
+        "Statement": [
+          { "Effect": "Allow", "Action": ["payments:Approve*", "payments:Get*"], "Resource": "payments:*" }
+        ]
+      }
+    },
+    "SecurityBaseline": {
+      "description": "Guardrails: destructive actions need MFA; everything needs the corporate network",
+      "document": {
+        "Statement": [
+          {
+            "Sid": "RequireMFAForDestructive",
+            "Effect": "Deny",
+            "Action": ["ec2:Terminate*", "*:Delete*", "iam:*"],
+            "Resource": "*",
+            "Condition": { "Bool": { "user:mfa": "false" } }
+          },
+          {
+            "Sid": "CorporateNetworkOnly",
+            "Effect": "Deny",
+            "Action": ["ec2:*", "s3:*", "deploy:*", "payments:*"],
+            "Resource": "*",
+            "Condition": { "NotIpAddress": { "request:ip": ["10.0.0.0/8", "127.0.0.1/32", "192.168.0.0/16"] } }
+          }
+        ]
+      }
+    }
+  },
+  "groups": {
+    "employees": { "policies": ["SecurityBaseline", "S3HomeFolder"] },
+    "auditors": { "policies": ["AuditorReadOnly"] },
+    "helpdesk": { "policies": ["HelpdeskUserAdmin"] },
+    "ops": { "policies": ["EC2TeamOperator"] }
+  },
+  "roles": {
+    "deployer": { "policies": ["ProdDeployBusinessHours"], "description": "Releases code to production" },
+    "payment-requester": { "policies": ["PaymentRequester"], "description": "Raises payments" },
+    "payment-approver": { "policies": ["PaymentApprover"], "description": "Approves payments" }
+  },
+  "sod_rules": [
+    { "name": "payments-maker-checker", "roles": ["payment-requester", "payment-approver"] }
+  ]
+}
