@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .audit import AuditLog
+from .endpoint import EndpointEventStore
 from .auth import PasswordPolicy, SessionManager, hash_password, verify_password
 from .policy import Decision, Policy, PolicyError, evaluate
 from .store import Store
@@ -52,9 +53,11 @@ class AccessControlService:
         session_ttl: int = 3600,
         max_failed_logins: int = 5,
         lockout_seconds: int = 900,
+        endpoint_events: EndpointEventStore | None = None,
     ):
         self.store = store or Store()
         self.audit = audit or AuditLog()
+        self.endpoint_events = endpoint_events or EndpointEventStore()
         self.password_policy = password_policy or PasswordPolicy()
         self.sessions = SessionManager(session_ttl)
         self.max_failed_logins = max_failed_logins

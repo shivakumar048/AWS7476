@@ -236,6 +236,41 @@ class ApiTests(unittest.TestCase):
         status, _ = self.call("POST", "/api/authorize", {"principal": "admin", "action": "x", "resource": "y"}, helper)
         self.assertEqual(status, 403)
 
+    def test_permissions_probe_is_self_only_and_not_audited(self):
+        t = self.login("auditor1")
+        before = len(self.svc.audit.entries())
+        status, body = self.call("POST", "/api/me/permissions", {"checks": [
+            {"action": "lac:ListUsers", "resource": "lac:user/*"},
+            {"action": "lac:CreateUser", "resource": "lac:user/*"},
+        ]}, t)
+        self.assertEqual((status, body), (200, [True, False]))
+        self.assertEqual(len(self.svc.audit.entries()), before)
+        self.assertEqual(self.call("POST", "/api/me/permissions", {"checks": [{}] * 51}, t)[0], 400)
+
+    def test_endpoint_events(self):
+        admin = self.login("admin")
+        events = [{"event": "blocked", "user": "bob", "host": "PC-7", "control": "paste", "trigger": "Ctrl+V", "process": "excel.exe"}]
+        status, body = self.call("POST", "/api/endpoint/events", {"events": events}, admin)
+        self.assertEqual((status, body), (200, {"accepted": 1}))
+        auditor = self.login("auditor1")
+        status, rows = self.call("GET", "/api/endpoint/events?host=PC-7", token=auditor)
+        self.assertEqual((status, rows[-1]["control"]), (200, "paste"))
+        # Auditors can read but not report; helpdesk can do neither.
+        self.assertEqual(self.call("POST", "/api/endpoint/events", {"events": events}, auditor)[0], 403)
+        self.assertEqual(self.call("GET", "/api/endpoint/events", token=self.login("helper"))[0], 403)
+        self.assertEqual(self.call("POST", "/api/endpoint/events", {"events": []}, admin)[0], 400)
+
+    def test_static_files_and_security_headers(self):
+        with urllib.request.urlopen(self.base + "/") as res:
+            self.assertIn("default-src 'self'", res.headers["Content-Security-Policy"])
+            self.assertIn(b"/static/js/app.js", res.read())
+        with urllib.request.urlopen(self.base + "/static/js/app.js") as res:
+            self.assertTrue(res.headers["Content-Type"].startswith("text/javascript"))
+        for path in ("/static/../service.py", "/static/%2e%2e/service.py", "/static/missing.js"):
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(self.base + path)
+            self.assertEqual(ctx.exception.code, 404, path)
+
     def test_bad_input(self):
         t = self.login("admin")
         self.assertEqual(self.call("POST", "/api/policies", {"name": "bad", "document": {"Statement": []}}, t)[0], 400)

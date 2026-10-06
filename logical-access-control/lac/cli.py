@@ -12,6 +12,7 @@ from typing import Any
 
 from .api import create_server
 from .audit import AuditLog
+from .endpoint import EndpointEventStore
 from .service import AccessControlError, AccessControlService
 from .store import Store
 
@@ -23,7 +24,11 @@ ADMIN_POLICY = {
 
 def open_service(data_dir: str) -> AccessControlService:
     base = Path(data_dir)
-    return AccessControlService(store=Store(base / "state.json"), audit=AuditLog(base / "audit.jsonl"))
+    return AccessControlService(
+        store=Store(base / "state.json"),
+        audit=AuditLog(base / "audit.jsonl"),
+        endpoint_events=EndpointEventStore(base / "endpoint-events.jsonl"),
+    )
 
 
 def _print(obj: Any) -> None:

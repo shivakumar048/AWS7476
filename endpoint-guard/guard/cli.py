@@ -11,7 +11,7 @@ import threading
 from . import config as config_mod
 from . import protect
 from .eventlog import EventLog
-from .policy_client import PolicyClient, start_refresh
+from .policy_client import EventForwarder, PolicyClient, start_refresh
 from .rules import CONTROLS, KEY_BINDINGS, Guard
 
 
@@ -43,7 +43,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     stop = threading.Event()
     if cfg.policy_server:
         configured = {c: cfg.controls[c].enabled for c in CONTROLS}
-        start_refresh(PolicyClient(cfg.policy_server, user), guard, configured, log.write, stop)
+        client = PolicyClient(cfg.policy_server, user)
+        start_refresh(client, guard, configured, log.write, stop)
+        if cfg.policy_server.report_events:
+            forwarder = EventForwarder(PolicyClient(cfg.policy_server, user))
+            log.forward = forwarder.submit
+            forwarder.start(stop, log.write)
     enforced = sorted(c for c in CONTROLS if guard.controls[c].enabled)
     log.write("started", enforced=enforced, dry_run=cfg.dry_run)
     try:

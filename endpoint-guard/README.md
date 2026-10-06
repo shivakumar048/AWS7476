@@ -102,6 +102,11 @@ environment variables. Every `refresh_seconds`, the guard asks whether the logge
 and `endpoint:Screenshot` on `endpoint:host/<computer-name>`. An **Allow** lifts that restriction for the
 user; anything else keeps it. If the server can't be reached, the local config stays in force (fail closed).
 
+You don't have to write these policies by hand: the console's **Endpoint rules** screen is a tick-box grid
+of groups × actions that writes them for you. Blocked attempts are also sent to the console every 10 seconds
+(the service account needs `lac:ReportEndpointEvents`) and appear under **Blocked actions**. Set
+`"report_events": false` in `policy_server` to keep events local only.
+
 Example: let the finance team copy and paste, but only on finance PCs.
 
 ```json

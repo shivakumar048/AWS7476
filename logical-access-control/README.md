@@ -45,6 +45,27 @@ python3 -m lac serve
 
 State lives in `./data/` (`state.json`, `audit.jsonl`); override it with `--data-dir` or `LAC_DATA_DIR`.
 
+## Web console
+
+`python3 -m lac serve` also serves an admin console at http://127.0.0.1:8080. It's plain HTML, CSS and
+JavaScript modules in `lac/static/`, with no build step or Node.js needed.
+
+| Screen | What you can do |
+|---|---|
+| Dashboard | Users, locked accounts, accounts without MFA, separation-of-duty conflicts, denials and failed logins in the last 24 h, blocked endpoint actions, audit-log integrity |
+| Users | Search and filter; create users with groups and tags; per user: enable/disable, unlock, MFA, reset password, groups, roles, direct policies, tags, effective access, test access, recent activity |
+| Groups / Roles & duties | Create and delete groups and roles, attach and detach policies, see members; create separation-of-duties rules and see violations |
+| Policies | List with "used by"; JSON editor with templates, live validation and a plain-English preview |
+| Endpoint rules | Tick which Endpoint Guard actions each group may do (copy, paste, delete, drag & drop…), optionally only on matching computers |
+| Blocked actions | Events reported by Endpoint Guard agents, with filters, auto-refresh and CSV export |
+| Access check | "May X do Y on Z?" with the deciding policy and statement |
+| Audit trail | Filterable log with integrity check and JSON export |
+| My access | Your own groups, roles, policies and password change |
+
+Each person only sees the screens their policies allow. For example, the seed `auditors` group gets a
+read-only console and a user with no admin rights sees only their own access. The server still checks
+every request. The page sends a strict Content-Security-Policy and renders all data as text.
+
 ## Writing policies
 
 ```json
@@ -112,6 +133,9 @@ Authenticate with `POST /api/login {"username","password"}` → `{"token"}`, the
 | `GET/POST /api/policies`, `PUT/DELETE /api/policies/{p}` | `lac:ListPolicies`, `lac:CreatePolicy`, ... |
 | `GET/POST /api/sod-rules`, `GET /api/sod-violations` | `lac:ListSoDRules` / `lac:CreateSoDRule` |
 | `GET /api/audit?limit=&actor=&event=`, `GET /api/audit/verify` | `lac:ReadAuditLog` |
+| `POST /api/me/permissions` `{checks:[{action, resource}]}` | — (your own permissions only, not audited) |
+| `POST /api/endpoint/events` `{events:[...]}` | `lac:ReportEndpointEvents` on `endpoint:host/<host>` |
+| `GET /api/endpoint/events?limit=&user=&host=&control=` | `lac:ReadEndpointEvents` |
 
 Integrating a system is one call per request it wants to guard:
 

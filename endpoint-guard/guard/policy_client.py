@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import socket
 import threading
 import urllib.error
@@ -48,21 +49,26 @@ class PolicyClient:
             raise RuntimeError(f"set {self.server.username_env} and {self.server.password_env} for the policy server")
         return self._post("/api/login", {"username": username, "password": password})["token"]
 
-    def decisions(self) -> dict[str, bool]:
-        """Return {control: user_is_allowed} for every control."""
+    def _post_authed(self, path: str, body: dict) -> dict:
         if self._token is None:
             self._token = self._login()
+        try:
+            return self._post(path, body, self._token)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 401:
+                raise
+            self._token = self._login()  # session expired
+            return self._post(path, body, self._token)
+
+    def report_events(self, events: list[dict]) -> int:
+        return self._post_authed("/api/endpoint/events", {"events": events})["accepted"]
+
+    def decisions(self) -> dict[str, bool]:
+        """Return {control: user_is_allowed} for every control."""
         out = {}
         for control in CONTROLS:
             body = {"principal": self.principal, "action": action_name(control), "resource": self.resource}
-            try:
-                result = self._post("/api/authorize", body, self._token)
-            except urllib.error.HTTPError as exc:
-                if exc.code != 401:
-                    raise
-                self._token = self._login()  # session expired
-                result = self._post("/api/authorize", body, self._token)
-            out[control] = bool(result.get("allowed"))
+            out[control] = bool(self._post_authed("/api/authorize", body).get("allowed"))
         return out
 
 
@@ -92,3 +98,53 @@ def start_refresh(client: PolicyClient, guard: Guard, configured: dict[str, bool
     thread = threading.Thread(target=loop, name="policy-refresh", daemon=True)
     thread.start()
     return thread
+
+
+class EventForwarder:
+    """Sends violation events to the console in batches, from a background thread.
+
+    Events are kept in memory (up to ``max_pending``) while the server is
+    unreachable and retried; the local log file is always the source of truth.
+    """
+
+    def __init__(self, client: PolicyClient, interval: float = 10.0, max_pending: int = 5000):
+        self.client = client
+        self.interval = interval
+        self._queue: queue.Queue = queue.Queue(maxsize=max_pending)
+        self._pending: list[dict] = []
+
+    def submit(self, entry: dict) -> None:
+        try:
+            self._queue.put_nowait(entry)
+        except queue.Full:
+            pass  # still in the local log file
+
+    def flush(self) -> int:
+        while True:
+            try:
+                self._pending.append(self._queue.get_nowait())
+            except queue.Empty:
+                break
+        sent = 0
+        while self._pending:
+            batch = self._pending[:500]
+            self.client.report_events(batch)
+            del self._pending[:len(batch)]
+            sent += len(batch)
+        return sent
+
+    def start(self, stop: threading.Event, log: Callable[..., None]) -> threading.Thread:
+        def loop():
+            while not stop.wait(self.interval):
+                try:
+                    self.flush()
+                except Exception as exc:
+                    log("forward_error", error=str(exc), pending=len(self._pending))
+            try:
+                self.flush()
+            except Exception:
+                pass
+
+        thread = threading.Thread(target=loop, name="event-forwarder", daemon=True)
+        thread.start()
+        return thread

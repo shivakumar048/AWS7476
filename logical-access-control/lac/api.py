@@ -20,6 +20,15 @@ from .service import AccessControlError, AccessControlService, AccessDenied, Aut
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_BODY = 1 << 20
+CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".ico": "image/x-icon",
+}
+CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
 
 Route = tuple[str, re.Pattern, Callable[..., Any], bool]
 
@@ -256,6 +265,43 @@ def build_router(svc: AccessControlService) -> Router:
         guard(ctx, "lac:ListSoDRules", "lac:sod/*")
         return svc.sod_violations()
 
+    @r.add("POST", "/api/me/permissions")
+    def my_permissions(ctx, body, query):
+        """Evaluate several (action, resource) pairs for the caller, without audit noise.
+
+        The console uses this to decide which screens to show; it reveals
+        nothing beyond the caller's own permissions.
+        """
+        checks = body.get("checks") or []
+        if not isinstance(checks, list) or len(checks) > 50:
+            raise AccessControlError("checks must be a list of at most 50 items")
+        out = []
+        for c in checks:
+            if not isinstance(c, dict):
+                raise AccessControlError("each check needs action and resource")
+            d = svc.authorize(ctx["user"], str(c.get("action", "")), str(c.get("resource", "")), ctx["request"], audit=False)
+            out.append(d.allowed)
+        return out
+
+    # -------------------------------------------------------- endpoint guard
+    @r.add("POST", "/api/endpoint/events")
+    def report_endpoint_events(ctx, body, query):
+        events = body.get("events")
+        if not isinstance(events, list) or not 0 < len(events) <= 500:
+            raise AccessControlError("events must be a list of 1-500 items")
+        for host in {str(e.get("host", "")) for e in events if isinstance(e, dict)}:
+            guard(ctx, "lac:ReportEndpointEvents", f"endpoint:host/{host}")
+        return {"accepted": svc.endpoint_events.add(events)}
+
+    @r.add("GET", "/api/endpoint/events")
+    def list_endpoint_events(ctx, body, query):
+        guard(ctx, "lac:ReadEndpointEvents", "lac:endpoint-events")
+        q = lambda k: query.get(k, [None])[0]
+        return svc.endpoint_events.query(
+            limit=min(int(q("limit") or 500), 5000),
+            user=q("user"), host=q("host"), control=q("control"), event=q("event"),
+        )
+
     # ------------------------------------------------------------------ audit
     @r.add("GET", "/api/audit")
     def audit(ctx, body, query):
@@ -286,14 +332,24 @@ def make_handler(svc: AccessControlService, router: Router):
             self.send_header("Content-Length", str(len(data)))
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Cache-Control", "no-store")
+            if content_type.startswith("text/html"):
+                self.send_header("Content-Security-Policy", CSP)
+                self.send_header("X-Frame-Options", "DENY")
             self.end_headers()
             self.wfile.write(data)
 
+        def _static(self, path: str) -> None:
+            rel = "index.html" if path in ("/", "/index.html") else path[len("/static/"):]
+            target = (STATIC_DIR / rel).resolve()
+            if not target.is_relative_to(STATIC_DIR.resolve()) or not target.is_file():
+                return self._send(404, {"error": "Not Found"})
+            ctype = CONTENT_TYPES.get(target.suffix, "application/octet-stream")
+            self._send(200, target.read_bytes(), ctype)
+
         def _handle(self, method: str) -> None:
             parsed = urlparse(self.path)
-            if method == "GET" and parsed.path in ("/", "/index.html"):
-                index = STATIC_DIR / "index.html"
-                return self._send(200, index.read_bytes(), "text/html; charset=utf-8")
+            if method == "GET" and (parsed.path in ("/", "/index.html") or parsed.path.startswith("/static/")):
+                return self._static(parsed.path)
             fn, params, auth = router.match(method, parsed.path)
             if fn is None:
                 status = HTTPStatus.METHOD_NOT_ALLOWED if auth else HTTPStatus.NOT_FOUND

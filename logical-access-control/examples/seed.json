@@ -7,7 +7,7 @@
           {
             "Sid": "ReadOnly",
             "Effect": "Allow",
-            "Action": ["lac:List*", "lac:Get*", "lac:ReviewAccess", "lac:ReadAuditLog", "lac:SimulatePrincipalPolicy"],
+            "Action": ["lac:List*", "lac:Get*", "lac:ReviewAccess", "lac:ReadAuditLog", "lac:ReadEndpointEvents", "lac:SimulatePrincipalPolicy"],
             "Resource": "*"
           }
         ]

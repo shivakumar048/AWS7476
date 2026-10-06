@@ -30,6 +30,7 @@ class PolicyServer:
     username_env: str = "LAC_USERNAME"
     password_env: str = "LAC_PASSWORD"
     refresh_seconds: int = 300
+    report_events: bool = True
 
 
 @dataclass
@@ -71,7 +72,7 @@ def parse(data: dict[str, Any]) -> Config:
         ps = data["policy_server"]
         if "url" not in ps:
             raise ConfigError("policy_server.url is required")
-        server = PolicyServer(**{k: ps[k] for k in ("url", "username_env", "password_env", "refresh_seconds") if k in ps})
+        server = PolicyServer(**{k: ps[k] for k in ("url", "username_env", "password_env", "refresh_seconds", "report_events") if k in ps})
     return Config(
         controls=controls,
         exempt_processes=_lower_set(data.get("exempt_processes"), "exempt_processes"),

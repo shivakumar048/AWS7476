@@ -10,7 +10,7 @@ from pathlib import Path
 
 from guard import cli
 from guard.config import ConfigError, PolicyServer, parse
-from guard.policy_client import PolicyClient, action_name, apply_decisions
+from guard.policy_client import EventForwarder, PolicyClient, action_name, apply_decisions
 from guard.protect import protect_command, unprotect_command
 from guard.rules import (ALT, CONTROLS, CTRL, SHIFT, VK_C, VK_D, VK_DELETE, VK_INSERT, VK_SNAPSHOT, VK_V, VK_X, WIN,
                          ControlSettings, Guard)
@@ -211,6 +211,7 @@ class PolicyServerIntegrationTests(unittest.TestCase):
         svc.create_user("guard-svc", pw, groups=["svc"])
         svc.create_user("alice", pw, groups=["finance"])
         svc.create_user("bob", pw)
+        cls.svc = svc
         cls.server = create_server(svc, "127.0.0.1", 0)
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
         cls.url = f"http://127.0.0.1:{cls.server.server_address[1]}"
@@ -238,6 +239,17 @@ class PolicyServerIntegrationTests(unittest.TestCase):
 
     def test_unprivileged_user_fully_restricted(self):
         self.assertFalse(any(self.decisions_for("bob").values()))
+
+    def test_events_forwarded_to_console(self):
+        from unittest import mock
+        with mock.patch.dict("os.environ", self.env):
+            fwd = EventForwarder(PolicyClient(PolicyServer(self.url), "bob"))
+            for i in range(3):
+                fwd.submit({"event": "blocked", "user": "bob", "host": "PC-1", "control": "copy", "trigger": "Ctrl+C"})
+            self.assertEqual(fwd.flush(), 3)
+        stored = self.svc.endpoint_events.query(user="bob")
+        self.assertEqual(len(stored), 3)
+        self.assertEqual(stored[0]["control"], "copy")
 
     def test_action_names(self):
         self.assertEqual(action_name("drag_drop"), "endpoint:DragDrop")
